@@ -162,6 +162,19 @@ details.round .inner{padding:4px 0 16px}
 .off{color:var(--muted);text-decoration:line-through}
 .toggle{display:flex;align-items:center;gap:10px;font-weight:600;cursor:pointer}
 .toggle input{width:22px;height:22px;min-height:0;accent-color:var(--accent)}
+.tbl .s0{position:sticky;left:0;z-index:1;font-weight:700;border-right:1px solid var(--line)}
+.tbl td.s0{background:var(--surface)}
+.tbl th.s0{background:#2a7d34}
+.lst{list-style:none;margin:10px 0 0;padding:0}
+.lst li{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:.93rem}
+.lst li:last-child{border-bottom:0}
+.lst b{text-align:right}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
+.duel{display:grid;grid-template-columns:6.4rem 1fr 4.4rem;gap:8px;align-items:center;font-size:.92rem}
+.duel .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;display:flex;align-items:center}
+.duel .bar{display:flex;height:14px;border-radius:5px;overflow:hidden;background:var(--field)}
+.duel .bar i{display:block;background:var(--accent)}
+.duel .bar i+i{background:var(--orange)}
 .hidden-file{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:10px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;z-index:10}
 .toast.show{opacity:1}
@@ -413,14 +426,14 @@ function computeStats(onlyActive){
     });
   });
   const list=Object.values(S).filter(s=>!onlyActive||s.p.active);
-  list.forEach(s=>{s.avgRel=mean(s.rels);s.avgScore=mean(s.scores);s.tend=median(s.srels);s.winRate=s.n?s.wins/s.n*100:null;s.rank=null});
+  list.forEach(s=>{s.medRel=median(s.rels);s.avgScore=mean(s.scores);s.tend=median(s.srels);s.winRate=s.n?s.wins/s.n*100:null;s.rank=null});
   const q=list.filter(s=>s.n>=MIN_ROUNDS).sort((a,b)=>b.avgScore-a.avgScore||b.wins-a.wins);
   q.forEach((s,i)=>{const p=q[i-1];s.rank=p&&p.avgScore===s.avgScore&&p.wins===s.wins?p.rank:i+1});
   return list;
 }
 
 /* ---------- UI-Zustand ---------- */
-let onlyActive=true,loading=true,loadError=null,adminId=lsGet(ADMIN_KEY),loginOpen=false,confirmKey=null,sortKey='rank',sortDir=1,chartPid=null,importText='',importPrev=null,importErr=null;
+let showMore=false,h2hPid=null,onlyActive=true,loading=true,loadError=null,adminId=lsGet(ADMIN_KEY),loginOpen=false,confirmKey=null,sortKey='rank',sortDir=1,chartPid=null,importText='',importPrev=null,importErr=null;
 const $=s=>document.querySelector(s);
 const isAdmin=()=>!!state.players.find(p=>p.id===adminId)||state.players.length===0;
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),3000)}
@@ -530,7 +543,7 @@ function viewRangliste(){
     {k:'rank',h:'#',cls:'s1',v:s=>s.rank,f:s=>s.rank??'–'},
     {k:'name',h:'Name',cls:'s2 l',v:s=>s.p.name.toLowerCase(),f:s=>`<span class="nm">${av(s.p.id,24)}${esc(s.p.name)}</span>`},
     {k:'n',h:'Schätzungen',v:s=>s.n,f:s=>s.n},
-    {k:'avgRel',h:'Ø Abw.',v:s=>s.avgRel,f:s=>fmtPct(s.avgRel)},
+    {k:'medRel',h:'Typische Abw.',v:s=>s.medRel,f:s=>fmtPct(s.medRel)},
     {k:'best',h:'Beste',v:s=>s.best&&s.best.rel,f:s=>s.best?`<span title="${esc(s.best.round.question)}">${fmtPct(s.best.rel)}</span>`:'–'},
     {k:'worst',h:'Schlechteste',v:s=>s.worst&&s.worst.rel,f:s=>s.worst?`<span title="${esc(s.worst.round.question)}">${fmtPct(s.worst.rel)}</span>`:'–'},
     {k:'wins',h:'Siege',v:s=>s.wins,f:s=>s.wins},
@@ -545,7 +558,7 @@ function viewRangliste(){
     if(x==null&&y==null)return 0;if(x==null)return 1;if(y==null)return -1;
     return (x<y?-1:x>y?1:0)*sortDir;
   });
-  const q=played.filter(s=>s.rank);
+  const q=played.filter(s=>s.rank).sort((a,b)=>a.rank-b.rank||b.wins-a.wins);
   const top=q[0],mostWins=[...played].sort((a,b)=>b.wins-a.wins)[0],mostAdmin=[...played].sort((a,b)=>b.admin-a.admin)[0];
   const hit=played.filter(s=>s.best).sort((a,b)=>a.best.rel-b.best.rel)[0];
   const streak=[...played].sort((a,b)=>b.maxStreak-a.maxStreak)[0];
@@ -558,22 +571,23 @@ function viewRangliste(){
   ].filter(Boolean);
   const byDiff=[...played].sort((a,b)=>(b.wins-b.losses)-(a.wins-a.losses)||b.wins-a.wins);
   const mxW=Math.max(...played.map(s=>Math.max(s.wins,s.losses)),1);
-  const acc=played.filter(s=>s.avgRel!=null).sort((a,b)=>a.avgRel-b.avgRel).map(s=>({id:s.p.id,name:s.p.name,v:s.avgRel}));
+  const acc=played.filter(s=>s.medRel!=null).sort((a,b)=>a.medRel-b.medRel).map(s=>({id:s.p.id,name:s.p.name,v:s.medRel}));
   const tend=played.filter(s=>s.tend!=null).sort((a,b)=>b.tend-a.tend),mxT=Math.max(...tend.map(s=>Math.abs(s.tend)),1);
   if(!all.find(s=>s.p.id===chartPid&&s.n>0))chartPid=(top||played[0]).p.id;
   const cs=all.find(s=>s.p.id===chartPid);
   return `<div class="stack">
     <label class="toggle"><input type="checkbox" id="chkActive"${onlyActive?' checked':''}> Nur aktive Teilnehmende anzeigen</label>
+    <label class="toggle"><input type="checkbox" id="chkMore"${showMore?' checked':''}> Weitere Statistiken anzeigen</label>
     <div class="tiles">${tiles.map(t=>`<div class="tile"><span>${t[0]}</span><b>${t[1]}</b><span>${t[2]}</span></div>`).join('')}</div>
     <div><div class="scroll"><table class="tbl"><thead><tr>${cols.map(c=>`<th class="${c.cls||''}" scope="col" aria-sort="${c.k===sortKey?(sortDir>0?'ascending':'descending'):'none'}"><button type="button" data-act="sort" data-k="${c.k}">${c.h}${c.k===sortKey?(sortDir>0?' ▲':' ▼'):''}</button></th>`).join('')}</tr></thead>
     <tbody>${sorted.map(s=>`<tr class="${s.rank?'':'out'}">${cols.map(c=>`<td class="${c.cls||''}">${c.f(s)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
-    <p class="note">Abweichungen in % vom richtigen Wert, damit Fragen mit verschiedenen Einheiten vergleichbar sind. Ø Form ist die durchschnittliche Platzierung von 0 (immer Letzter) bis 100 (immer Sieger). Der Gesamtrang gilt ab ${MIN_ROUNDS} Schätzungen. Tendenz zeigt, ob jemand typischerweise zu hoch (+) oder zu tief (−) schätzt.</p></div>
+    <p class="note">Abweichungen in % vom richtigen Wert, damit Fragen mit verschiedenen Einheiten vergleichbar sind. «Typische Abw.» ist der Median aller Abweichungen einer Person, die Hälfte ihrer Schätzungen liegt näher dran. Ø Form ist die durchschnittliche Platzierung von 0 (immer Letzter) bis 100 (immer Sieger). Der Gesamtrang gilt ab ${MIN_ROUNDS} Schätzungen. Tendenz zeigt, ob jemand typischerweise zu hoch (+) oder zu tief (−) schätzt.</p></div>
     <section class="card"><h3>Siege und K.O.s</h3>
       <div class="legend"><span></span><span>← K.O.</span><span>Siege →</span></div>
       <div class="bars">${byDiff.map(s=>`<div class="drow"><span class="n">${av(s.p.id,20)}${esc(s.p.name)}</span>
         <div class="dl"><b>${s.losses||''}</b><i style="width:${s.losses/mxW*100}%"></i></div>
         <div class="dr"><i style="width:${s.wins/mxW*100}%"></i><b>${s.wins||''}</b></div></div>`).join('')}</div></section>
-    <section class="card"><h3>Treffsicherheit</h3><p class="meta" style="margin:4px 0 0">Durchschnittliche Abweichung, kürzer ist besser.</p>${barRows(acc,fmtPct)}</section>
+    <section class="card"><h3>Treffsicherheit</h3><p class="meta" style="margin:4px 0 0">Typische Abweichung (Median), kürzer ist besser. Einzelne Ausreisser verzerren den Wert nicht.</p>${barRows(acc,fmtPct)}</section>
     <section class="card"><h3>Zu hoch oder zu tief?</h3>
       <div class="legend"><span></span><span>← zu tief</span><span>zu hoch →</span></div>
       <div class="bars">${tend.map(s=>`<div class="drow"><span class="n">${av(s.p.id,20)}${esc(s.p.name)}</span>
@@ -582,7 +596,114 @@ function viewRangliste(){
     <section class="card"><div class="row" style="justify-content:space-between;align-items:center"><h3>Formkurve</h3>
       <div class="field" style="flex:0 1 190px"><label for="selChart" class="eyebrow">Person</label><select id="selChart">${played.map(s=>`<option value="${s.p.id}"${s.p.id===chartPid?' selected':''}>${esc(s.p.name)}</option>`).join('')}</select></div></div>
       ${formChart(cs)}</section>
+    ${showMore?viewExtra(sorted):''}
   </div>`;
+}
+function quantile(a,q){const s=[...a].sort((x,y)=>x-y);if(!s.length)return null;const p=(s.length-1)*q,lo=Math.floor(p),hi=Math.ceil(p);return s[lo]+(s[hi]-s[lo])*(p-lo)}
+const WD=['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+const shortQ=q=>q.length>64?q.slice(0,62)+'…':q;
+const monLabel=k=>k.slice(5)+'.'+k.slice(0,4);
+function viewExtra(list){
+  const nm=id=>`<span class="nm">${av(id,20)}${esc(pname(id))}</span>`;
+  const rs=closedRounds().map((r,i)=>({r,i,ev:evalRound(r)}));
+  const ids=new Set(list.map(s=>s.p.id));
+  const P={};state.players.forEach(p=>P[p.id]={n:0,first:null,pn:0,pod:0,h10:0,ex:0,exp:0,wins:0,scores:[],rels:[],ko:0,maxKo:0,ws:0});
+  rs.forEach(({i,ev})=>{
+    const W=new Set(ev.winners.map(x=>x.pid)),L=new Set(ev.losers.map(x=>x.pid));
+    ev.entries.forEach(x=>{const s=P[x.pid];if(!s)return;
+      s.n++;if(s.first===null)s.first=i;
+      if(ev.n>3){s.pn++;if(x.rank<=3)s.pod++}
+      if(x.rel!=null&&x.rel<=10)s.h10++;
+      if(x.abs===0)s.ex++;
+      if(ev.n>1)s.exp+=1/ev.n;
+      if(x.score!=null)s.scores.push(x.score);
+      if(x.rel!=null)s.rels.push(x.rel);
+      if(W.has(x.pid)){s.wins++;s.ws++}else s.ws=0;
+      if(L.has(x.pid)){s.ko++;s.maxKo=Math.max(s.maxKo,s.ko)}else s.ko=0;
+    });
+  });
+  const sg=(x,d=1)=>{const v=Number(x.toFixed(d));return (v>0?'+':v<0?'−':'±')+fmtN(Math.abs(v),d)};
+  const rows=list.map(s=>{
+    const p=P[s.p.id],tot=rs.length-(p.first||0),luck=p.wins-p.exp;
+    const l10=p.scores.length>=5?mean(p.scores.slice(-10)):null,all=mean(p.scores),d=l10==null?null:l10-all;
+    return `<tr><td class="s0 l"><span class="nm">${av(s.p.id,24)}${esc(s.p.name)}</span></td>
+      <td>${tot?fmtN(p.n/tot*100,0)+' %':'–'}</td>
+      <td>${p.pn?p.pod+' ('+fmtN(p.pod/p.pn*100,0)+' %)':'–'}</td>
+      <td>${p.n?p.h10+' ('+fmtN(p.h10/p.n*100,0)+' %)':'–'}</td>
+      <td>${p.ex}</td>
+      <td>${p.wins} / ${fmtN(p.exp,1)}</td>
+      <td class="${luck>=0?'pos':'neg'}">${p.n?sg(luck):'–'}</td>
+      <td>${p.rels.length>=4?fmtPct(quantile(p.rels,.75)-quantile(p.rels,.25)):'–'}</td>
+      <td>${l10==null?'–':fmtN(l10,0)+' <span class="'+(d>=0?'pos':'neg')+'">'+(d>=0?'▲ ':'▼ ')+sg(d,0)+'</span>'}</td>
+      <td>${p.ko} / ${p.maxKo}</td>
+      <td>${p.ws}</td>
+      <td class="${s.admin-s.losses>0?'pos':s.admin-s.losses<0?'neg':''}">${sg(s.admin-s.losses,0)}</td></tr>`;
+  }).join('');
+  const table=`<section class="card"><h3>Erweiterte Kennzahlen</h3>
+    <div class="scroll" style="margin-top:12px"><table class="tbl"><thead><tr>
+      <th class="s0 l">Name</th><th>Teilnahme</th><th>Podest</th><th>Treffer ±10 %</th><th>Volltreffer</th><th>Siege / erwartet</th><th>Glück</th><th>Konstanz</th><th>Form (letzte 10)</th><th>K.O.-Serie akt. / max</th><th>Siegesserie</th><th>Admin-Bilanz</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <p class="note">Teilnahme: Anteil der Runden seit der ersten Teilnahme. Podest: Top 3 (nur Runden mit mehr als 3 Teilnehmenden). Erwartete Siege: Summe aus 1 / Teilnehmerzahl pro Runde, «Glück» ist die Differenz zu den tatsächlichen Siegen. Konstanz: Spanne der mittleren Hälfte der Abweichungen, kleiner ist verlässlicher. Form: Ø Form der letzten 10 Runden mit Abstand zum Gesamtschnitt. Admin-Bilanz: Admin-Dienste minus K.O.s (plus heisst, die Person ist öfter eingesprungen).</p></section>`;
+
+  const C=rs.filter(({ev})=>ev.n>=3).map(({r,ev})=>{
+    const g=Object.values(r.guesses),a=r.actual,mE=Math.abs(median(g)-a),aE=Math.abs(mean(g)-a);
+    return {mE,aE,best:ev.entries[0].abs,mR:1+ev.entries.filter(x=>x.abs<mE).length,aR:1+ev.entries.filter(x=>x.abs<aE).length,n:ev.n};
+  });
+  const crowd=C.length?`<section class="card"><h3>Weisheit der Menge</h3>
+    <p class="meta" style="margin:4px 0 0">Wie gut wäre ein Tipp, der einfach den Median oder Durchschnitt aller Schätzungen nimmt?</p>
+    <ul class="lst"><li><span>Median-Tipp schlägt den Tagessieger</span><b>${fmtN(C.filter(c=>c.mE<c.best).length/C.length*100,0)} % der Runden</b></li>
+    <li><span>Median-Tipp läge im Schnitt auf Platz</span><b>${fmtN(mean(C.map(c=>c.mR)),1)} von ${fmtN(mean(C.map(c=>c.n)),1)}</b></li>
+    <li><span>Durchschnitts-Tipp schlägt den Tagessieger</span><b>${fmtN(C.filter(c=>c.aE<c.best).length/C.length*100,0)} % der Runden</b></li>
+    <li><span>Durchschnitts-Tipp läge im Schnitt auf Platz</span><b>${fmtN(mean(C.map(c=>c.aR)),1)} von ${fmtN(mean(C.map(c=>c.n)),1)}</b></li></ul>
+    <p class="note">Basis: ${C.length} Runden mit mindestens 3 Teilnehmenden.</p></section>`:'';
+
+  if(!list.find(s=>s.p.id===h2hPid))h2hPid=list[0].p.id;
+  const duel=list.filter(s=>s.p.id!==h2hPid).map(s=>{
+    let a=0,b=0;
+    rs.forEach(({r})=>{const x=r.guesses[h2hPid],y=r.guesses[s.p.id];if(x===undefined||y===undefined)return;
+      const ax=Math.abs(x-r.actual),ay=Math.abs(y-r.actual);if(ax<ay)a++;else if(ay<ax)b++});
+    return {id:s.p.id,a,b,t:a+b};
+  }).filter(d=>d.t>0).sort((x,y)=>y.a/y.t-x.a/x.t);
+  const duelCard=`<section class="card"><div class="row" style="justify-content:space-between;align-items:center"><h3>Direktduell</h3>
+    <div class="field" style="flex:0 1 190px"><label for="selH2h" class="eyebrow">Person</label><select id="selH2h">${list.map(s=>`<option value="${s.p.id}"${s.p.id===h2hPid?' selected':''}>${esc(s.p.name)}</option>`).join('')}</select></div></div>
+    <p class="meta" style="margin:4px 0 0">In Runden, in denen beide geschätzt haben: Wer lag näher dran? Grün = ${esc(pname(h2hPid))}, orange = Gegner.</p>
+    <div class="bars">${duel.map(d=>`<div class="duel"><span class="n">${av(d.id,20)}${esc(pname(d.id))}</span><div class="bar"><i style="width:${d.a/d.t*100}%"></i><i style="width:${d.b/d.t*100}%"></i></div><b>${d.a} : ${d.b}</b></div>`).join('')||'<p class="meta">Noch keine gemeinsamen Runden.</p>'}</div></section>`;
+
+  const Q=rs.map(({r,ev})=>{const rels=ev.entries.map(x=>x.rel).filter(v=>v!=null);return rels.length>=3?{r,ev,m:median(rels)}:null}).filter(Boolean);
+  const qli=a=>a.map(x=>`<li><span>${shortQ(esc(x.r.question))}<br><span class="meta">${fmtD(x.r.date)}</span></span><b>${fmtPct(x.m)}</b></li>`).join('');
+  const hard=[...Q].sort((a,b)=>b.m-a.m).slice(0,5),easy=[...Q].sort((a,b)=>a.m-b.m).slice(0,5);
+  const questions=Q.length?`<section class="card"><h3>Schwerste und leichteste Fragen</h3>
+    <p class="meta" style="margin:4px 0 0">Typische Abweichung des ganzen Teams (Median) pro Frage.</p>
+    <div class="two"><div><div class="eyebrow" style="margin-top:12px">Schwerste</div><ul class="lst">${qli(hard)}</ul></div><div><div class="eyebrow" style="margin-top:12px">Leichteste</div><ul class="lst">${qli(easy)}</ul></div></div></section>`:'';
+
+  const close=rs.filter(({r,ev})=>ev.n>=2&&r.actual!==0).map(({r,ev})=>({r,e:ev.entries,gap:(ev.entries[1].abs-ev.entries[0].abs)/Math.abs(r.actual)*100})).sort((a,b)=>a.gap-b.gap).slice(0,5);
+  const outl=[];rs.forEach(({r,ev})=>ev.entries.forEach(x=>{if(x.rel!=null)outl.push({r,x})}));outl.sort((a,b)=>b.x.rel-a.x.rel);
+  const dramas=`<section class="card"><h3>Knappste Entscheidungen und grösste Ausreisser</h3><div class="two">
+    <div><div class="eyebrow" style="margin-top:12px">Knappster Vorsprung des Siegers</div><ul class="lst">${close.map(c=>`<li><span>${shortQ(esc(c.r.question))}<br><span class="meta">${esc(pname(c.e[0].pid))} vor ${esc(pname(c.e[1].pid))} · ${fmtD(c.r.date)}</span></span><b>${c.gap===0?'Gleichstand':fmtPct(c.gap)}</b></li>`).join('')}</ul></div>
+    <div><div class="eyebrow" style="margin-top:12px">Grösste Ausreisser</div><ul class="lst">${outl.slice(0,5).map(o=>`<li><span>${esc(pname(o.x.pid))}: ${fmtN(o.x.guess)} statt ${fmtN(o.r.actual)}<br><span class="meta">${shortQ(esc(o.r.question))}</span></span><b>${fmtPct(o.x.rel)}</b></li>`).join('')}</ul></div></div></section>`;
+
+  const byMon={};rs.forEach(({r,ev})=>{const k=r.date.slice(0,7);(byMon[k]=byMon[k]||[]).push({r,ev})});
+  const mons=Object.keys(byMon).sort().slice(-12);
+  const monItems=mons.map(k=>({name:monLabel(k),v:median(byMon[k].flatMap(({ev})=>ev.entries.map(x=>x.rel).filter(v=>v!=null)))})).filter(i=>i.v!=null);
+  const trend=monItems.length>1?`<section class="card"><h3>Team-Genauigkeit pro Monat</h3><p class="meta" style="margin:4px 0 0">Typische Abweichung aller Schätzungen (Median), kürzer ist besser.</p>${barRows(monItems,fmtPct)}</section>`:'';
+
+  const wd=[1,2,3,4,5].map(d=>{const w={};let n=0;rs.forEach(({r,ev})=>{const [y,m,dd]=r.date.split('-').map(Number);if(new Date(y,m-1,dd).getDay()!==d)return;n++;ev.winners.forEach(x=>{w[x.pid]=(w[x.pid]||0)+1})});
+    const mx=Math.max(0,...Object.values(w));return {d,n,mx,who:Object.keys(w).filter(k=>w[k]===mx)}});
+  const mm=mons.slice().reverse().map(k=>{const sc={};byMon[k].forEach(({ev})=>ev.entries.forEach(x=>{if(x.score!=null)(sc[x.pid]=sc[x.pid]||[]).push(x.score)}));
+    const c=Object.entries(sc).filter(([,a])=>a.length>=3).map(([id,a])=>({id,v:mean(a)})).sort((a,b)=>b.v-a.v)[0];return {k,c}});
+  const when=`<section class="card"><h3>Wer gewinnt wann?</h3><div class="two">
+    <div><div class="eyebrow" style="margin-top:12px">Meiste Siege je Wochentag</div><ul class="lst">${wd.filter(x=>x.n).map(x=>`<li><span>${WD[x.d]} <span class="meta">(${x.n} Runden)</span></span><b>${x.mx?x.who.map(id=>esc(pname(id))).join(', ')+' · '+x.mx:'–'}</b></li>`).join('')}</ul></div>
+    <div><div class="eyebrow" style="margin-top:12px">Monatsmeister (Ø Form, ab 3 Runden)</div><ul class="lst">${mm.map(m=>`<li><span>${monLabel(m.k)}</span><b>${m.c?esc(pname(m.c.id))+' · '+fmtN(m.c.v,0):'–'}</b></li>`).join('')}</ul></div></div></section>`;
+
+  const B=[['unter 10',a=>a<10],['10 bis 99',a=>a>=10&&a<100],['100 bis 999',a=>a>=100&&a<1000],['1’000 bis 9’999',a=>a>=1000&&a<10000],['ab 10’000',a=>a>=10000]];
+  const mag=B.map(([lab,f])=>{const sel=rs.filter(({r})=>r.actual>0&&f(r.actual));const per={};
+    sel.forEach(({ev})=>ev.entries.forEach(x=>{if(x.rel!=null)(per[x.pid]=per[x.pid]||[]).push(x.rel)}));
+    const c=Object.entries(per).filter(([,a])=>a.length>=3).map(([id,a])=>({id,v:median(a)})).sort((a,b)=>a.v-b.v);
+    return {lab,n:sel.length,best:c[0],worst:c.length>1?c[c.length-1]:null}}).filter(x=>x.n);
+  const magCard=`<section class="card"><h3>Treffsicherheit nach Grössenordnung</h3><p class="meta" style="margin:4px 0 0">Wer schätzt kleine, wer grosse Zahlen am besten? Typische Abweichung (Median), ab 3 Schätzungen in der Kategorie.</p>
+    <ul class="lst">${mag.map(m=>`<li><span>${m.lab} <span class="meta">(${m.n} Runden)</span></span><b>${m.best?'Beste: '+esc(pname(m.best.id))+' '+fmtPct(m.best.v):'–'}${m.worst?'<br><span class="meta">Schwächste: '+esc(pname(m.worst.id))+' '+fmtPct(m.worst.v)+'</span>':''}</b></li>`).join('')}</ul></section>`;
+
+  return table+crowd+duelCard+questions+dramas+trend+when+magCard;
 }
 function viewChronik(){
   const cl=closedRounds().reverse();
@@ -670,7 +791,7 @@ const FORMS={
 };
 const ACTS={
   toggleLogin(){if(state.players.find(p=>p.id===adminId)){adminId=null;lsDel(ADMIN_KEY);loginOpen=false;confirmKey=null}else loginOpen=!loginOpen;render()},
-  sort(el){const k=el.dataset.k;if(sortKey===k)sortDir*=-1;else{sortKey=k;sortDir=(k==='rank'||k==='name'||k==='avgRel'||k==='best')?1:-1}render()},
+  sort(el){const k=el.dataset.k;if(sortKey===k)sortDir*=-1;else{sortKey=k;sortDir=(k==='rank'||k==='name'||k==='medRel'||k==='best')?1:-1}render()},
   async removeAvatar(el){await API.setAvatar(el.dataset.id,'');await reload();render();toast('Profilbild entfernt.')},
   async togglePlayer(el){const p=state.players.find(p=>p.id===el.dataset.id);if(p){await API.setActive(p.id,!p.active);await reload();render()}},
   async dropRound(el){const k='drop'+el.dataset.id;if(confirmKey!==k){confirmKey=k;render();return}confirmKey=null;await API.deleteRound(el.dataset.id);await reload();render();toast('Runde verworfen.')},
@@ -684,6 +805,8 @@ const guarded=async fn=>{try{await fn()}catch(err){toast('Fehler: '+String(err&&
 document.addEventListener('submit',e=>{e.preventDefault();const h=FORMS[e.target.dataset.form];if(h)guarded(()=>h(e.target))});
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(el&&ACTS[el.dataset.act])guarded(()=>ACTS[el.dataset.act](el))});
 document.addEventListener('change',e=>{
+  if(e.target.id==='chkMore'){showMore=e.target.checked;render()}
+  if(e.target.id==='selH2h'){h2hPid=e.target.value;render()}
   if(e.target.id==='chkActive'){onlyActive=e.target.checked;render()}
   if(e.target.id==='selChart'){chartPid=e.target.value;render()}
   if(e.target.id==='selPlayer'){lsSet(ME_KEY,e.target.value);const r=state.rounds.find(r=>r.status==='open');if(r){const v=r.guesses[e.target.value];$('#inpGuess').value=v!==undefined?v:'';$('#btnGuess').textContent=v!==undefined?'Schätzung ändern':'Schätzung abgeben'}}
